@@ -3,7 +3,7 @@ from __future__ import annotations
 import dataclasses
 import random
 
-from .models import (
+from models import (
     AddActions,
     AddBuys,
     AddCoins,
