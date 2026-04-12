@@ -1,0 +1,17 @@
+[project]
+name = "dominion-server"
+version = "0.1.0"
+description = "Dominion card game server"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "websockets>=14.0",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
