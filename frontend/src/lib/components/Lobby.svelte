@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { game } from '$lib/stores/game'
+	import { game } from '$lib/stores/game.svelte'
 
 	let mode = $state<'pick' | 'create' | 'join'>('pick')
 	let nameInput = $state('')
@@ -128,7 +128,7 @@
 						type="text"
 						bind:value={codeInput}
 						placeholder="e.g. KXMR"
-						maxlength="8"
+						maxlength="12"
 						style="text-transform: uppercase; letter-spacing: 0.15em;"
 						onkeydown={(e) => e.key === 'Enter' && handleJoin()}
 					/>

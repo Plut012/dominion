@@ -23,10 +23,14 @@ from models import (
     CreateRoom,
     EndPhase,
     GameOver,
+    GameState,
     JoinRoom,
+    Phase,
     PlayCard,
     PlayerScore,
+    PlayerState,
     StartGame,
+    TurnState,
 )
 from engine import GameEngine
 from views import make_player_view, player_view_to_dict
@@ -210,7 +214,7 @@ async def handle_start_game(
         return
 
     # Resolve kingdom cards.
-    all_kingdom_ids = [c.id for c in KINGDOM_CARDS]
+    all_kingdom_ids = list(KINGDOM_CARDS)
     if msg.kingdom == "random":
         kingdom_ids = random.sample(all_kingdom_ids, min(10, len(all_kingdom_ids)))
     else:
@@ -224,15 +228,36 @@ async def handle_start_game(
 
     # Build supply and player list in connection order.
     player_ids = list(room.players.keys())
-    player_names_ordered = [room.player_names[pid] for pid in player_ids]
     supply = setup_supply(kingdom_ids, num_players=len(player_ids))
 
-    room.engine = GameEngine(
+    # Create starting decks (7 Copper + 3 Estate), shuffle, draw 5.
+    players = []
+    for pid in player_ids:
+        deck = [BASE_CARDS["copper"]] * 7 + [BASE_CARDS["estate"]] * 3
+        random.shuffle(deck)
+        hand = deck[:5]
+        deck = deck[5:]
+        players.append(PlayerState(
+            id=pid,
+            name=room.player_names[pid],
+            hand=hand,
+            deck=deck,
+            discard=[],
+            in_play=[],
+        ))
+
+    state = GameState(
         room_code=room.code,
-        player_ids=player_ids,
-        player_names=player_names_ordered,
         supply=supply,
+        trash=[],
+        players=players,
+        current_player=0,
+        phase=Phase.ACTION,
+        effect_queue=[],
+        pending_choice=None,
+        turn_state=TurnState(),
     )
+    room.engine = GameEngine(state)
     room.started = True
 
     await broadcast_state(room)
@@ -407,4 +432,4 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=7478)

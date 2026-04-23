@@ -14,7 +14,7 @@ export class GameSocket {
     this.onMessage = onMessage
     this.onConnection = onConnection
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    this.url = `${protocol}//${window.location.hostname}:8000/ws`
+    this.url = `${protocol}//${window.location.hostname}:7478/ws`
   }
 
   connect(): void {

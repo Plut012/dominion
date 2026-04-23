@@ -20,6 +20,7 @@ from models import (
     SupplyPile,
     TurnState,
 )
+from cards.base import BASE_CARDS
 
 # ---------------------------------------------------------------------------
 # Card serialization
@@ -120,11 +121,9 @@ def make_player_view(state: GameState, player_id: str) -> PlayerView:
     # searching all player zones and trash.  A more direct approach is to pull
     # the card definition from the cards registry, but since we want this
     # module to stay self-contained we gather them from any available source.
-    card_registry = _build_card_registry(state)
-
     supply: dict[str, SupplyPile] = {}
     for card_id, count in state.supply.items():
-        card_def = card_registry.get(card_id)
+        card_def = BASE_CARDS.get(card_id)
         if card_def is not None:
             supply[card_id] = SupplyPile(card=card_def, count=count)
 

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Choice, Card } from '$lib/game/types'
-	import { game } from '$lib/stores/game'
+	import { game } from '$lib/stores/game.svelte'
 	import CardComponent from './Card.svelte'
 
 	interface Props {

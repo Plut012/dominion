@@ -57,7 +57,7 @@ BACKEND_PID=$!
 sleep 1
 
 if kill -0 "$BACKEND_PID" 2>/dev/null; then
-    echo -e "  ${G} ✓ ${N} Server listening on ${Y}:8000${N}"
+    echo -e "  ${G} ✓ ${N} Server listening on ${Y}:7478${N}"
 else
     echo -e "  ${R} ✗ ${N} Server failed to start. Check ${D}/tmp/dominion-backend.log${N}"
     exit 1

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { game } from '$lib/stores/game'
+	import { game } from '$lib/stores/game.svelte'
 
 	const phase = $derived(game.phase)
 	const turnState = $derived(game.turnState)
