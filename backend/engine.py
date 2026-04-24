@@ -72,6 +72,20 @@ class _BanditChoose(Effect):
     revealed: list  # list[Card], typed as list to avoid forward-ref issues
 
 
+@dataclasses.dataclass
+class _ReactionCheck(Effect):
+    """Internal effect: give a Reaction-holding opponent the chance to block an attack.
+
+    Before applying *attack_effects* to *opponent_id*, ask that opponent whether
+    they want to reveal a Moat (or other Reaction card) from their hand.  If
+    they reveal, the attack effects are skipped.  Otherwise they are prepended
+    to the queue and resolved normally.
+    """
+
+    opponent_id: str
+    attack_effects: list  # list[Effect], typed as list to avoid forward-ref issues
+
+
 # ---------------------------------------------------------------------------
 # Card registry — populated externally (e.g. by cards/base.py on import)
 # ---------------------------------------------------------------------------
@@ -327,10 +341,23 @@ class GameEngine:
         elif isinstance(effect, ForEachOpponent):
             opponents = self._opponents(target_player)
             # Prepend targeted effects for each opponent in turn order.
+            # If an opponent holds a Reaction card, wrap their effects in a
+            # ReactionCheck so they get a chance to block the attack first.
             new_effects: list[Effect] = []
             for opp in opponents:
-                for sub in effect.effects:
-                    new_effects.append(_TargetedEffect(inner=sub, player_id=opp.id))
+                has_reaction = any(
+                    CardType.REACTION in c.types for c in opp.hand
+                )
+                if has_reaction:
+                    new_effects.append(
+                        _ReactionCheck(
+                            opponent_id=opp.id,
+                            attack_effects=list(effect.effects),
+                        )
+                    )
+                else:
+                    for sub in effect.effects:
+                        new_effects.append(_TargetedEffect(inner=sub, player_id=opp.id))
             state.effect_queue = new_effects + state.effect_queue
 
         elif isinstance(effect, PlayCardTwice):
@@ -741,6 +768,38 @@ class GameEngine:
                 source_effect=effect,
             )
 
+        elif isinstance(effect, _ReactionCheck):
+            opp = self._player_by_id(effect.opponent_id)
+            # Find Reaction cards the opponent holds.
+            reaction_cards = [c for c in opp.hand if CardType.REACTION in c.types]
+            if not reaction_cards:
+                # No reactions in hand anymore (hand changed) — apply attack effects.
+                targeted = [
+                    _TargetedEffect(inner=sub, player_id=opp.id)
+                    for sub in effect.attack_effects
+                ]
+                state.effect_queue = targeted + state.effect_queue
+                return
+            # Build option list: one entry per unique reaction card name in hand.
+            # Use card id as the option value so we can look it up.
+            seen: set[str] = set()
+            valid_reactions: list[str] = []
+            for c in reaction_cards:
+                if c.id not in seen:
+                    valid_reactions.append(c.id)
+                    seen.add(c.id)
+            state.pending_choice = Choice(
+                prompt=(
+                    "An Attack is being played against you. "
+                    "Reveal a Reaction card to block it, or choose 'none'."
+                ),
+                player_id=opp.id,
+                valid_options=valid_reactions + ["none"],
+                min_selections=1,
+                max_selections=1,
+                source_effect=effect,
+            )
+
         else:
             state.log.append(f"[engine] Unhandled effect: {type(effect).__name__}")
 
@@ -907,6 +966,25 @@ class GameEngine:
                 else:
                     player.discard.append(card)
                     state.log.append(f"{player.name} discards {card.name}.")
+
+        elif isinstance(effect, _ReactionCheck):
+            revealed_id = choice[0]
+            if revealed_id == "none":
+                # Player declined to reveal; apply the attack effects.
+                targeted = [
+                    _TargetedEffect(inner=sub, player_id=player.id)
+                    for sub in effect.attack_effects
+                ]
+                state.effect_queue = targeted + state.effect_queue
+            else:
+                # Player reveals a Reaction card — log it and skip attack effects.
+                reaction_card = next(
+                    (c for c in player.hand if c.id == revealed_id), None
+                )
+                card_name = reaction_card.name if reaction_card else revealed_id
+                state.log.append(
+                    f"{player.name} reveals {card_name} — unaffected by the attack."
+                )
 
         else:
             state.log.append(
