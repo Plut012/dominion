@@ -9,10 +9,12 @@ from models import (
     AddCoins,
     Card,
     CardType,
+    CellarDiscard,
     Choice,
     ChooseCards,
     DiscardCards,
     DiscardDownTo,
+    DiscardPerEmptyPile,
     DrawCards,
     Effect,
     ForEachOpponent,
@@ -20,13 +22,17 @@ from models import (
     GainCardCosting,
     GameState,
     MayPlay,
+    MayPlayFromDiscard,
+    MoneylenderTrash,
     Phase,
     PlayerState,
     PlayCardTwice,
     PutBack,
+    RegisterMerchantBonus,
     RevealCards,
     TrashAndGainUpgrade,
     TrashCards,
+    VassalDiscard,
     Zone,
 )
 
@@ -125,6 +131,19 @@ class GameEngine:
             player.in_play.append(card)
             state.turn_state.coins += card.coins
             state.log.append(f"{player.name} plays {card.name}.")
+            # Merchant bonus: first Silver played this turn awards +1 coin per
+            # Merchant that was played this turn.
+            if (
+                card.id == "silver"
+                and not state.turn_state.silver_played
+                and state.turn_state.merchant_bonuses > 0
+            ):
+                state.turn_state.coins += state.turn_state.merchant_bonuses
+                state.log.append(
+                    f"{player.name} gets +{state.turn_state.merchant_bonuses} "
+                    f"coin(s) from Merchant bonus."
+                )
+                state.turn_state.silver_played = True
             # Transition to buy phase when a treasure is played during action phase.
             if state.phase == Phase.ACTION:
                 state.phase = Phase.BUY
@@ -422,6 +441,77 @@ class GameEngine:
                 source_effect=effect,
             )
 
+        # --- New card-specific effects ---
+
+        elif isinstance(effect, CellarDiscard):
+            valid = [str(i) for i in range(len(target_player.hand))]
+            state.pending_choice = Choice(
+                prompt="Discard any number of cards, then draw that many.",
+                player_id=target_player.id,
+                valid_options=valid,
+                min_selections=0,
+                max_selections=len(valid),
+                source_effect=effect,
+            )
+
+        elif isinstance(effect, RegisterMerchantBonus):
+            state.turn_state.merchant_bonuses += 1
+
+        elif isinstance(effect, MoneylenderTrash):
+            valid = [
+                str(i)
+                for i, c in enumerate(target_player.hand)
+                if c.id == "copper"
+            ]
+            avail = len(valid)
+            state.pending_choice = Choice(
+                prompt="You may trash a Copper from your hand. If you do, +3 Coins.",
+                player_id=target_player.id,
+                valid_options=valid,
+                min_selections=0,
+                max_selections=min(1, avail),
+                source_effect=effect,
+            )
+
+        elif isinstance(effect, DiscardPerEmptyPile):
+            empty_piles = sum(
+                1 for count in state.supply.values() if count == 0
+            )
+            if empty_piles == 0:
+                return  # Nothing to discard.
+            # Enqueue a DiscardCards effect with the exact count needed.
+            discard_effect = DiscardCards(min=empty_piles, max=empty_piles)
+            state.effect_queue.insert(0, discard_effect)
+
+        elif isinstance(effect, VassalDiscard):
+            # Pop the top card of the deck (reshuffling discard if needed),
+            # discard it, then conditionally offer to play it if it's an Action.
+            if not target_player.deck:
+                self._shuffle_discard_into_deck(target_player)
+            if not target_player.deck:
+                return  # Empty deck and discard; nothing to reveal.
+            card = target_player.deck.pop(0)
+            target_player.discard.append(card)
+            state.log.append(f"{target_player.name} discards {card.name} from deck.")
+            if CardType.ACTION in card.types:
+                state.effect_queue.insert(0, MayPlayFromDiscard())
+
+        elif isinstance(effect, MayPlayFromDiscard):
+            # Offer to play the top card of the discard pile (placed there by VassalDiscard).
+            if not target_player.discard:
+                return
+            top = target_player.discard[-1]
+            if CardType.ACTION not in top.types:
+                return
+            state.pending_choice = Choice(
+                prompt=f"You may play {top.name} (Vassal).",
+                player_id=target_player.id,
+                valid_options=["yes", "no"],
+                min_selections=1,
+                max_selections=1,
+                source_effect=effect,
+            )
+
         else:
             state.log.append(f"[engine] Unhandled effect: {type(effect).__name__}")
 
@@ -482,6 +572,39 @@ class GameEngine:
             state.log.append(f"{player.name} plays {card.name}.")
             state.effect_queue = list(card.effects) + state.effect_queue
 
+        elif isinstance(effect, CellarDiscard):
+            # Discard chosen cards, then draw that many.
+            n_discarded = len(choice)
+            for idx in sorted((int(i) for i in choice), reverse=True):
+                card = player.hand.pop(idx)
+                player.discard.append(card)
+                state.log.append(f"{player.name} discards {card.name}.")
+            if n_discarded > 0:
+                state.effect_queue.insert(0, DrawCards(n_discarded))
+
+        elif isinstance(effect, MoneylenderTrash):
+            if not choice:
+                return  # Player chose not to trash a Copper; no bonus.
+            idx = int(choice[0])
+            card = player.hand.pop(idx)
+            state.trash.append(card)
+            state.log.append(f"{player.name} trashes {card.name}.")
+            if card.id == "copper":
+                state.turn_state.coins += 3
+                state.log.append(f"{player.name} gets +3 Coins from Moneylender.")
+
+        elif isinstance(effect, MayPlayFromDiscard):
+            # "yes" means play the top discard card; "no" means skip.
+            if not choice or choice[0] == "no":
+                return
+            # choice[0] == "yes": move top of discard to in_play and queue effects.
+            if not player.discard:
+                return
+            card = player.discard.pop()
+            player.in_play.append(card)
+            state.log.append(f"{player.name} plays {card.name} (Vassal).")
+            state.effect_queue = list(card.effects) + state.effect_queue
+
         else:
             state.log.append(
                 f"[engine] _apply_choice: unhandled effect {type(effect).__name__}"
@@ -526,6 +649,8 @@ class GameEngine:
         state.turn_state.actions = 1
         state.turn_state.buys = 1
         state.turn_state.coins = 0
+        state.turn_state.merchant_bonuses = 0
+        state.turn_state.silver_played = False
         state.effect_queue = []
         state.pending_choice = None
         player = self._current_player()
@@ -559,6 +684,10 @@ class GameEngine:
         empty_piles = sum(1 for count in state.supply.values() if count == 0)
         return empty_piles >= 3
 
+    def is_game_over(self) -> bool:
+        """Public wrapper — return True if the end-of-game condition is met."""
+        return self._check_game_over()
+
     def _calculate_scores(self) -> dict[str, int]:
         """Return {player_id: total_vp} for all players.
 
@@ -579,6 +708,10 @@ class GameEngine:
                     total += card.vp
             scores[player.id] = total
         return scores
+
+    def calculate_scores(self) -> dict[str, int]:
+        """Public wrapper — return {player_id: total_vp} for all players."""
+        return self._calculate_scores()
 
     # ------------------------------------------------------------------
     # Helpers

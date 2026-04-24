@@ -189,6 +189,68 @@ class TrashAndGainUpgrade(Effect):
         return True
 
 
+@dataclass
+class CellarDiscard(Effect):
+    """Discard any number of cards, then draw that many (Cellar).
+
+    Behaves like DiscardCards but after the choice resolves, the engine
+    enqueues DrawCards(n) where n equals the number actually discarded.
+    """
+
+    @property
+    def requires_choice(self) -> bool:
+        return True
+
+
+@dataclass
+class RegisterMerchantBonus(Effect):
+    """Register that a Merchant was played this turn.
+
+    When resolved, increments turn_state.merchant_bonuses by 1.
+    The bonus is awarded the first time a Silver is played this turn.
+    """
+
+
+@dataclass
+class MoneylenderTrash(Effect):
+    """Optionally trash a Copper from hand; if one was trashed, gain +3 coins."""
+
+    @property
+    def requires_choice(self) -> bool:
+        return True
+
+
+@dataclass
+class DiscardPerEmptyPile(Effect):
+    """Discard one card per empty Supply pile (Poacher).
+
+    Resolved dynamically: counts empty piles at resolution time and
+    either skips (0 empty piles) or enqueues DiscardCards(min=n, max=n).
+    """
+
+
+@dataclass
+class VassalDiscard(Effect):
+    """Discard the top card of your deck; if it is an Action, you may play it (Vassal).
+
+    Resolved by the engine: pops top card, discards it, then if the card
+    is an Action type, enqueues MayPlayFromDiscard.
+    """
+
+
+@dataclass
+class MayPlayFromDiscard(Effect):
+    """You may play the top card of your discard pile if it is an Action card.
+
+    Set by VassalDiscard resolution. The engine checks discard top,
+    prompts the player, and if chosen, moves it to in_play and queues effects.
+    """
+
+    @property
+    def requires_choice(self) -> bool:
+        return True
+
+
 # ---------------------------------------------------------------------------
 # Card
 # ---------------------------------------------------------------------------
@@ -219,6 +281,10 @@ class TurnState:
     actions: int = 1
     buys: int = 1
     coins: int = 0
+    # Merchant tracking: how many Merchant bonuses are pending this turn,
+    # and whether the first Silver has already been played.
+    merchant_bonuses: int = 0
+    silver_played: bool = False
 
 
 @dataclass

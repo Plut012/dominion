@@ -132,10 +132,10 @@ async def check_game_over(room: Room) -> bool:
     if not room.engine.is_game_over():
         return False
 
-    scores = room.engine.calculate_scores()  # list of (player_id, score)
+    scores = room.engine.calculate_scores()  # dict of player_id → score
     score_list = [
         PlayerScore(player_name=room.player_names.get(pid, pid), score=sc)
-        for pid, sc in scores
+        for pid, sc in scores.items()
     ]
     payload = GameOver(scores=score_list).model_dump()
     for ws in list(room.players.values()):

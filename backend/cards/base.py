@@ -15,19 +15,25 @@ from models import (
     AddCoins,
     Card,
     CardType,
+    CellarDiscard,
     ChooseCards,
     DiscardCards,
     DiscardDownTo,
+    DiscardPerEmptyPile,
     DrawCards,
     ForEachOpponent,
     GainCard,
     GainCardCosting,
     MayPlay,
+    MayPlayFromDiscard,
+    MoneylenderTrash,
     PlayCardTwice,
     PutBack,
+    RegisterMerchantBonus,
     RevealCards,
     TrashAndGainUpgrade,
     TrashCards,
+    VassalDiscard,
     Zone,
 )
 
@@ -131,15 +137,7 @@ CELLAR = Card(
     types=[CardType.ACTION],
     effects=[
         AddActions(1),
-        # Player chooses any number of cards to discard, then draws that many.
-        # NOTE: DiscardCards uses a fixed max. A full implementation needs a
-        # "discard N, draw N" effect where N is determined by the player's
-        # choice (DrawCards equal to number discarded). Current models support
-        # this as a two-step interaction: engine should count cards discarded
-        # by this DiscardCards effect and enqueue DrawCards(n_discarded).
-        DiscardCards(min=0, max=999),
-        # TODO: engine must enqueue DrawCards(n) after resolving the discard
-        # where n = number of cards actually discarded by this effect.
+        CellarDiscard(),
     ],
     description="+1 Action. Discard any number of cards, then draw that many.",
     art="cellar.webp",
@@ -214,11 +212,7 @@ MERCHANT = Card(
     effects=[
         DrawCards(1),
         AddActions(1),
-        # NOTE: The "first Silver played this turn gives +1 coin" bonus is a
-        # conditional deferred effect. models.py has no WhenPlaysTreasure or
-        # ConditionalAddCoins effect. The engine must track Merchant plays and
-        # hook into the treasure-play step to award +1 coin the first time a
-        # Silver is played that turn.
+        RegisterMerchantBonus(),
     ],
     description="+1 Card, +1 Action. The first time you play a Silver this turn, +1 coin.",
     art="merchant.webp",
@@ -231,14 +225,7 @@ VASSAL = Card(
     types=[CardType.ACTION],
     effects=[
         AddCoins(2),
-        # Discard top card of deck; if it is an Action, may play it.
-        # NOTE: models.py has no "RevealAndMayPlayTopOfDeck" effect. The
-        # engine needs to reveal the top card, and if it is an ACTION type,
-        # prompt the player via MayPlay. Using RevealCards(1) + MayPlay as
-        # the closest available combination; engine must handle the conditional
-        # "discard if not played" cleanup.
-        RevealCards(1),
-        MayPlay(card_type=CardType.ACTION),
+        VassalDiscard(),
     ],
     description="+2 Coins. Discard the top card of your deck. If it's an Action card, you may play it.",
     art="vassal.webp",
@@ -340,15 +327,7 @@ MONEYLENDER = Card(
     cost=4,
     types=[CardType.ACTION],
     effects=[
-        # Trash a Copper from hand; if you did, +3 coins.
-        # NOTE: models.py has no "TrashForBonus" or conditional effect.
-        # Closest: TrashCards(min=0, max=1, filter_type=TREASURE) then
-        # AddCoins(3). The engine must award the +3 coins only when a Copper
-        # was actually trashed (conditional on the player's choice resolving
-        # with a Copper).
-        TrashCards(min=0, max=1, filter_type=CardType.TREASURE),
-        AddCoins(3),
-        # TODO: AddCoins(3) should be conditional on a Copper being trashed.
+        MoneylenderTrash(),
     ],
     description="You may trash a Copper from your hand. If you do, +3 Coins.",
     art="moneylender.webp",
@@ -363,14 +342,7 @@ POACHER = Card(
         DrawCards(1),
         AddActions(1),
         AddCoins(1),
-        # Discard a card per empty supply pile.
-        # NOTE: models.py has no "DiscardPerEmptyPile" effect. The engine
-        # must count empty supply piles at resolution time and enqueue
-        # DiscardCards(min=n, max=n) where n = number of empty piles.
-        # Represented here as a marker DiscardCards with min=0 to be replaced
-        # by the engine at resolution.
-        DiscardCards(min=0, max=0),
-        # TODO: engine must substitute the correct min/max based on empty pile count.
+        DiscardPerEmptyPile(),
     ],
     description="+1 Card, +1 Action, +1 Coin. Discard a card per empty Supply pile.",
     art="poacher.webp",
