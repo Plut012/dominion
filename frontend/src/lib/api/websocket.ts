@@ -2,11 +2,13 @@ import type { ClientMessage, ServerMessage } from '$lib/game/types'
 
 type MessageHandler = (msg: ServerMessage) => void
 type ConnectionHandler = (connected: boolean) => void
+type OpenHandler = () => void
 
 export class GameSocket {
   private ws: WebSocket | null = null
   private onMessage: MessageHandler
   private onConnection: ConnectionHandler
+  private onOpen: OpenHandler | null = null
   private url: string
   private reconnected = false
 
@@ -17,7 +19,8 @@ export class GameSocket {
     this.url = `${protocol}//${window.location.hostname}:7478/ws`
   }
 
-  connect(): void {
+  connect(onOpen?: OpenHandler): void {
+    this.onOpen = onOpen ?? null
     this.reconnected = false
     this._open()
   }
@@ -28,6 +31,9 @@ export class GameSocket {
 
     ws.onopen = () => {
       this.onConnection(true)
+      if (this.onOpen) {
+        this.onOpen()
+      }
     }
 
     ws.onmessage = (event: MessageEvent) => {

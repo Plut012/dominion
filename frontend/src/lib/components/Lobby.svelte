@@ -13,6 +13,7 @@
 	const connected = $derived(game.connected)
 	const error = $derived(game.error)
 	const inLobby = $derived(game.inLobby)
+	const reconnecting = $derived(game.reconnecting)
 
 	function validateName(): boolean {
 		const trimmed = nameInput.trim()
@@ -61,7 +62,12 @@
 		<p class="subtitle">A deck-building game for the ages</p>
 	</header>
 
-	{#if !connected}
+	{#if reconnecting}
+		<div class="status-msg">
+			<span class="dot reconnecting"></span>
+			Reconnecting…
+		</div>
+	{:else if !connected}
 		<div class="status-msg">
 			<span class="dot disconnected"></span>
 			Connecting to server…
@@ -238,6 +244,11 @@
 
 	.dot.disconnected {
 		background: #c0392b;
+		animation: blink 1.2s ease-in-out infinite;
+	}
+
+	.dot.reconnecting {
+		background: var(--accent);
 		animation: blink 1.2s ease-in-out infinite;
 	}
 

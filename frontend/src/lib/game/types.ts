@@ -72,20 +72,32 @@ export interface EndPhaseMsg { type: 'end_phase' }
 export type ClientMessage =
   | CreateRoomMsg
   | JoinRoomMsg
+  | RejoinMsg
   | StartGameMsg
   | PlayCardMsg
   | BuyCardMsg
   | ChooseMsg
   | EndPhaseMsg
 
+// Messages client → server (rejoin)
+export interface RejoinMsg { type: 'rejoin'; player_id: string; room_code: string }
+
 // Messages server → client
-export interface RoomCreatedMsg { type: 'room_created'; room_code: string; players: string[] }
-export interface PlayerJoinedMsg { type: 'player_joined'; players: string[] }
+export interface RoomCreatedMsg { type: 'room_created'; room_code: string; player_id: string; players: string[] }
+export interface PlayerJoinedMsg { type: 'player_joined'; players: string[]; player_id?: string }
 export interface GameStateMsg { type: 'game_state'; state: PlayerView }
 export interface ChoiceRequiredMsg { type: 'choice_required'; choice: Choice }
 export interface GameOverMsg { type: 'game_over'; scores: { player_name: string; score: number }[] }
 export interface ErrorMsg { type: 'error'; message: string }
 export interface LogMsg { type: 'log'; entries: string[] }
+export interface RejoinSuccessMsg {
+  type: 'rejoin_success'
+  room_code: string
+  player_id: string
+  state?: PlayerView       // present when game is in progress
+  players?: string[]       // present when still in lobby
+}
+export interface RejoinFailedMsg { type: 'rejoin_failed'; reason: string }
 
 export type ServerMessage =
   | RoomCreatedMsg
@@ -95,3 +107,5 @@ export type ServerMessage =
   | GameOverMsg
   | ErrorMsg
   | LogMsg
+  | RejoinSuccessMsg
+  | RejoinFailedMsg

@@ -1,12 +1,13 @@
 """FastAPI WebSocket server for the Dominion card game.
 
 Single endpoint: ws:// /ws
-First message must be create_room or join_room.
+First message must be create_room, join_room, or rejoin.
 All subsequent messages are game actions.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import random
@@ -45,6 +46,9 @@ ROOM_WORDS = [
     "SHIELD", "BANNER", "DRAGON", "FORGE", "REALM",
 ]
 
+# Grace period in seconds before a disconnected player is removed.
+DISCONNECT_GRACE_SECONDS = 30
+
 
 def generate_room_code() -> str:
     word = random.choice(ROOM_WORDS)
@@ -55,15 +59,17 @@ def generate_room_code() -> str:
 @dataclass
 class Room:
     code: str
-    players: dict[str, WebSocket] = field(default_factory=dict)   # player_id → ws
-    player_names: dict[str, str] = field(default_factory=dict)    # player_id → name
+    players: dict[str, WebSocket] = field(default_factory=dict)          # player_id → ws (connected only)
+    player_names: dict[str, str] = field(default_factory=dict)           # player_id → name (all players)
+    disconnected: set[str] = field(default_factory=set)                  # player_ids currently offline
+    disconnect_timers: dict[str, asyncio.TimerHandle] = field(default_factory=dict)  # player_id → timer
     host_id: str = ""
     engine: GameEngine | None = None
     started: bool = False
 
     def ordered_player_names(self) -> list[str]:
-        """Return player names in insertion order."""
-        return [self.player_names[pid] for pid in self.players]
+        """Return player names in insertion order (all players, including disconnected)."""
+        return [self.player_names[pid] for pid in self.player_names]
 
 
 # Global room registry: room_code → Room
@@ -146,6 +152,74 @@ async def check_game_over(room: Room) -> bool:
     return True
 
 
+def _expire_player(room: Room, player_id: str) -> None:
+    """Called by the disconnect timer when the grace period expires.
+
+    Removes the player permanently and cleans up the room if needed.
+    This runs synchronously inside the event loop via call_later.
+    """
+    room.disconnected.discard(player_id)
+    room.disconnect_timers.pop(player_id, None)
+    room.player_names.pop(player_id, None)
+
+    if not room.player_names:
+        rooms.pop(room.code, None)
+    elif not room.started:
+        # Still in lobby — notify remaining connected players.
+        # We can't await here (synchronous callback), so schedule as a task.
+        asyncio.ensure_future(broadcast_player_list(room))
+
+
+async def handle_rejoin(ws: WebSocket, player_id: str, room_code: str) -> tuple[str | None, "Room | None"]:
+    """Attempt to rejoin a room after a disconnect.
+
+    Returns (player_id, room) on success, (None, None) on failure.
+    Sends rejoin_failed directly instead of using send_error, so the caller
+    doesn't send a second error message.
+    """
+    room = rooms.get(room_code.upper())
+    if room is None:
+        await ws.send_json({"type": "rejoin_failed", "reason": f"Room '{room_code}' not found."})
+        return None, None
+
+    if player_id not in room.disconnected:
+        if player_id in room.players:
+            reason = "You are already connected."
+        else:
+            reason = "Player not found in room."
+        await ws.send_json({"type": "rejoin_failed", "reason": reason})
+        return None, None
+
+    # Cancel the expiry timer.
+    timer = room.disconnect_timers.pop(player_id, None)
+    if timer is not None:
+        timer.cancel()
+
+    # Restore connection.
+    room.disconnected.discard(player_id)
+    room.players[player_id] = ws
+
+    # Send current state.
+    if room.started and room.engine is not None:
+        view = make_player_view(room.engine.state, player_id)
+        await ws.send_json({
+            "type": "rejoin_success",
+            "room_code": room_code.upper(),
+            "player_id": player_id,
+            "state": player_view_to_dict(view),
+        })
+    else:
+        # Still in lobby.
+        await ws.send_json({
+            "type": "rejoin_success",
+            "room_code": room_code.upper(),
+            "player_id": player_id,
+            "players": room.ordered_player_names(),
+        })
+
+    return player_id, room
+
+
 # ---------------------------------------------------------------------------
 # Message handlers
 # ---------------------------------------------------------------------------
@@ -172,6 +246,7 @@ async def handle_create_room(ws: WebSocket, msg: CreateRoom) -> tuple[str, Room]
         {
             "type": "room_created",
             "room_code": code,
+            "player_id": player_id,
             "players": room.ordered_player_names(),
         }
     )
@@ -196,7 +271,20 @@ async def handle_join_room(ws: WebSocket, msg: JoinRoom) -> tuple[str | None, Ro
     room.players[player_id] = ws
     room.player_names[player_id] = msg.player_name
 
-    await broadcast_player_list(room)
+    # Send joining player their own player_id along with the player list.
+    await ws.send_json({
+        "type": "player_joined",
+        "player_id": player_id,
+        "players": room.ordered_player_names(),
+    })
+    # Notify the other players (no player_id needed for them).
+    names = room.ordered_player_names()
+    for pid, other_ws in list(room.players.items()):
+        if pid != player_id:
+            try:
+                await other_ws.send_json({"type": "player_joined", "players": names})
+            except Exception:
+                pass
     return player_id, room
 
 
@@ -359,8 +447,16 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 await websocket.close()
                 return
 
+        elif msg_type == "rejoin":
+            pid = data.get("player_id", "")
+            rc = data.get("room_code", "")
+            player_id, room = await handle_rejoin(websocket, pid, rc)
+            if player_id is None:
+                await websocket.close()
+                return
+
         else:
-            await send_error(websocket, "First message must be 'create_room' or 'join_room'.")
+            await send_error(websocket, "First message must be 'create_room', 'join_room', or 'rejoin'.")
             await websocket.close()
             return
 
@@ -410,19 +506,32 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         except Exception:
             pass
     finally:
-        # Clean up: remove the player from their room and notify others.
+        # On disconnect, start a grace-period timer instead of immediately removing the player.
+        # This allows page refreshes to rejoin seamlessly.
         if room is not None and player_id is not None:
             room.players.pop(player_id, None)
-            room.player_names.pop(player_id, None)
 
-            if not room.players:
-                # Last player left — remove the room entirely.
+            if player_id in room.player_names:
+                room.disconnected.add(player_id)
+                loop = asyncio.get_event_loop()
+                timer = loop.call_later(
+                    DISCONNECT_GRACE_SECONDS,
+                    _expire_player,
+                    room,
+                    player_id,
+                )
+                room.disconnect_timers[player_id] = timer
+
+            if not room.player_names:
+                # Room is empty (shouldn't happen here but be safe) — clean up.
                 rooms.pop(room.code, None)
+            elif not room.players and not room.started:
+                # All players disconnected, still in lobby — they can still rejoin.
+                pass
             elif not room.started:
-                # Room still in lobby — notify remaining players.
+                # Room still in lobby with some connected players — notify them.
                 await broadcast_player_list(room)
-            # If game was in progress we leave the room so others can finish
-            # (or detect the disconnect from the missing player in state).
+            # If game is in progress: leave room intact; disconnected player can rejoin.
 
 
 # ---------------------------------------------------------------------------
