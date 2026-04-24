@@ -7,6 +7,7 @@ from models import (
     AddActions,
     AddBuys,
     AddCoins,
+    BanditAttack,
     Card,
     CardType,
     Choice,
@@ -14,17 +15,24 @@ from models import (
     DiscardCards,
     DiscardDownTo,
     DrawCards,
+    DrawToHandSize,
     Effect,
     ForEachOpponent,
     GainCard,
     GainCardCosting,
     GameState,
+    InspectTopCards,
+    LibraryContinue,
+    LibrarySkipChoice,
     MayPlay,
     Phase,
     PlayerState,
     PlayCardTwice,
     PutBack,
     RevealCards,
+    SentryDiscard,
+    SentryReturn,
+    SentryTrash,
     TrashAndGainUpgrade,
     TrashCards,
     Zone,
@@ -46,6 +54,16 @@ class _TargetedEffect(Effect):
 
     inner: Effect
     player_id: str
+
+
+@dataclasses.dataclass
+class _BanditChoose(Effect):
+    """Internal effect: player selects which of the revealed cards to trash for Bandit.
+
+    Used only when the opponent has multiple non-Copper Treasures revealed.
+    """
+
+    revealed: list  # list[Card], typed as list to avoid forward-ref issues
 
 
 # ---------------------------------------------------------------------------
@@ -313,6 +331,136 @@ class GameEngine:
             # Full implementation requires tracking "staged" cards; stub for now.
             pass
 
+        elif isinstance(effect, DrawToHandSize):
+            # Kick off Library loop.
+            state.effect_queue.insert(
+                0, LibraryContinue(set_aside=[], target=effect.target)
+            )
+
+        elif isinstance(effect, LibraryContinue):
+            # Loop body: draw one card; if Action ask to skip; else keep; repeat.
+            hand_size = len(target_player.hand)
+            if hand_size >= effect.target:
+                # Reached target — discard any set-aside cards.
+                for card in effect.set_aside:
+                    target_player.discard.append(card)
+                    state.log.append(
+                        f"{target_player.name} discards set-aside {card.name}."
+                    )
+                return
+            # Attempt to draw one card.
+            if not target_player.deck:
+                self._shuffle_discard_into_deck(target_player)
+            if not target_player.deck:
+                # No cards to draw — discard set-aside and stop.
+                for card in effect.set_aside:
+                    target_player.discard.append(card)
+                    state.log.append(
+                        f"{target_player.name} discards set-aside {card.name}."
+                    )
+                return
+            drawn = target_player.deck.pop(0)
+            if CardType.ACTION in drawn.types:
+                # Ask player whether to keep or set aside this Action.
+                state.effect_queue.insert(
+                    0,
+                    LibrarySkipChoice(
+                        candidate=drawn,
+                        set_aside=effect.set_aside,
+                        target=effect.target,
+                    ),
+                )
+            else:
+                # Non-Action: always keep.
+                target_player.hand.append(drawn)
+                state.log.append(f"{target_player.name} draws {drawn.name}.")
+                # Continue loop.
+                state.effect_queue.insert(
+                    0,
+                    LibraryContinue(set_aside=effect.set_aside, target=effect.target),
+                )
+
+        elif isinstance(effect, InspectTopCards):
+            # Stage top n cards from deck (reshuffling if needed).
+            staged: list[Card] = []
+            for _ in range(effect.n):
+                if not target_player.deck:
+                    self._shuffle_discard_into_deck(target_player)
+                if not target_player.deck:
+                    break
+                staged.append(target_player.deck.pop(0))
+            if staged:
+                names = ", ".join(c.name for c in staged)
+                state.log.append(
+                    f"{target_player.name} looks at: {names}."
+                )
+                # Queue three-step interaction: trash, then discard, then return.
+                state.effect_queue = [
+                    SentryTrash(staged=staged),
+                    SentryDiscard(staged=staged),
+                    SentryReturn(staged=staged),
+                ] + state.effect_queue
+
+        elif isinstance(effect, BanditAttack):
+            # Reveal top 2 cards; trash a non-Copper Treasure; discard the rest.
+            revealed: list[Card] = []
+            for _ in range(2):
+                if not target_player.deck:
+                    self._shuffle_discard_into_deck(target_player)
+                if not target_player.deck:
+                    break
+                revealed.append(target_player.deck.pop(0))
+            if revealed:
+                names = ", ".join(c.name for c in revealed)
+                state.log.append(f"{target_player.name} reveals: {names}.")
+            # Find non-Copper treasures.
+            trashable = [
+                c for c in revealed
+                if CardType.TREASURE in c.types and c.id != "copper"
+            ]
+            if not trashable:
+                # No trashable treasure — discard everything.
+                for card in revealed:
+                    target_player.discard.append(card)
+                    state.log.append(f"{target_player.name} discards {card.name}.")
+            elif len(trashable) == 1:
+                # Exactly one — trash it automatically, discard the rest.
+                state.trash.append(trashable[0])
+                state.log.append(
+                    f"{target_player.name} trashes {trashable[0].name}."
+                )
+                for card in revealed:
+                    if card is not trashable[0]:
+                        target_player.discard.append(card)
+                        state.log.append(
+                            f"{target_player.name} discards {card.name}."
+                        )
+            else:
+                # Multiple non-Copper treasures — player must choose one to trash.
+                # Encode revealed cards as indexed options among the revealed list.
+                valid = [
+                    str(i) for i, c in enumerate(revealed)
+                    if CardType.TREASURE in c.types and c.id != "copper"
+                ]
+                # Stash revealed cards so _apply_choice can access them via
+                # a temporary BanditChoose effect.
+                bandit_choice_effect = _BanditChoose(
+                    revealed=revealed,
+                )
+                state.pending_choice = Choice(
+                    prompt=(
+                        "Choose a Treasure to trash: "
+                        + ", ".join(
+                            f"{i}={revealed[int(i)].name}" for i in valid
+                        )
+                    ),
+                    player_id=target_player.id,
+                    valid_options=valid,
+                    min_selections=1,
+                    max_selections=1,
+                    source_effect=bandit_choice_effect,
+                )
+
         # --- Choice-requiring effects ---
 
         elif isinstance(effect, TrashCards):
@@ -385,10 +533,18 @@ class GameEngine:
             valid = [
                 cid
                 for cid, count in state.supply.items()
-                if count > 0 and get_card(cid).cost <= effect.max_cost
+                if count > 0
+                and get_card(cid).cost <= effect.max_cost
+                and (
+                    effect.filter_type is None
+                    or effect.filter_type in get_card(cid).types
+                )
             ]
+            type_clause = (
+                f" ({effect.filter_type.value})" if effect.filter_type else ""
+            )
             state.pending_choice = Choice(
-                prompt=f"Gain a card costing up to {effect.max_cost} coins.",
+                prompt=f"Gain a card{type_clause} costing up to {effect.max_cost} coins.",
                 player_id=target_player.id,
                 valid_options=valid,
                 min_selections=0,
@@ -397,13 +553,21 @@ class GameEngine:
             )
 
         elif isinstance(effect, TrashAndGainUpgrade):
-            valid = [str(i) for i in range(len(target_player.hand))]
+            valid = [
+                str(i)
+                for i, c in enumerate(target_player.hand)
+                if effect.filter_type is None or effect.filter_type in c.types
+            ]
+            avail = len(valid)
+            type_clause = (
+                f" {effect.filter_type.value}" if effect.filter_type else ""
+            )
             state.pending_choice = Choice(
-                prompt="Choose a card from your hand to trash.",
+                prompt=f"Choose a{type_clause} card from your hand to trash.",
                 player_id=target_player.id,
                 valid_options=valid,
                 min_selections=0,
-                max_selections=1,
+                max_selections=min(1, avail),
                 source_effect=effect,
             )
 
@@ -418,6 +582,71 @@ class GameEngine:
                 player_id=target_player.id,
                 valid_options=valid,
                 min_selections=0,
+                max_selections=1,
+                source_effect=effect,
+            )
+
+        elif isinstance(effect, SentryTrash):
+            # Player chooses which staged cards to trash (may choose none).
+            valid = [str(i) for i in range(len(effect.staged))]
+            avail = len(valid)
+            state.pending_choice = Choice(
+                prompt=(
+                    "Sentry: choose cards to trash: "
+                    + ", ".join(f"{i}={effect.staged[int(i)].name}" for i in valid)
+                ),
+                player_id=target_player.id,
+                valid_options=valid,
+                min_selections=0,
+                max_selections=avail,
+                source_effect=effect,
+            )
+
+        elif isinstance(effect, SentryDiscard):
+            # Player chooses which remaining staged cards to discard.
+            valid = [str(i) for i in range(len(effect.staged))]
+            avail = len(valid)
+            state.pending_choice = Choice(
+                prompt=(
+                    "Sentry: choose cards to discard: "
+                    + ", ".join(f"{i}={effect.staged[int(i)].name}" for i in valid)
+                ),
+                player_id=target_player.id,
+                valid_options=valid,
+                min_selections=0,
+                max_selections=avail,
+                source_effect=effect,
+            )
+
+        elif isinstance(effect, SentryReturn):
+            # Player must specify the order to return remaining cards to deck-top.
+            # They submit the indices in the order they want them placed (last
+            # submitted index ends up on top since we insert at position 0).
+            valid = [str(i) for i in range(len(effect.staged))]
+            avail = len(valid)
+            if avail == 0:
+                return  # Nothing left to return.
+            state.pending_choice = Choice(
+                prompt=(
+                    "Sentry: choose order to return cards to your deck (first = bottom, last = top): "
+                    + ", ".join(f"{i}={effect.staged[int(i)].name}" for i in valid)
+                ),
+                player_id=target_player.id,
+                valid_options=valid,
+                min_selections=avail,
+                max_selections=avail,
+                source_effect=effect,
+            )
+
+        elif isinstance(effect, LibrarySkipChoice):
+            state.pending_choice = Choice(
+                prompt=(
+                    f"Library: set aside {effect.candidate.name} (Action card)? "
+                    "Choose 'yes' to set aside, 'no' to keep."
+                ),
+                player_id=target_player.id,
+                valid_options=["yes", "no"],
+                min_selections=1,
                 max_selections=1,
                 source_effect=effect,
             )
@@ -446,15 +675,27 @@ class GameEngine:
         elif isinstance(effect, ChooseCards):
             zone_cards = self._zone_cards(player, effect.zone)
             chosen = [zone_cards[int(i)] for i in choice]
-            state.log.append(
-                f"{player.name} chooses: {', '.join(c.name for c in chosen)}."
-            )
+            if chosen:
+                state.log.append(
+                    f"{player.name} chooses: {', '.join(c.name for c in chosen)}."
+                )
+            if effect.move_to is not None and chosen:
+                # Remove chosen cards from their source zone and send to destination.
+                source = self._zone_cards(player, effect.zone)
+                for card in chosen:
+                    source.remove(card)
+                    self._send_to_zone(player, card, effect.move_to)
+                    state.log.append(
+                        f"{player.name} moves {card.name} to {effect.move_to.value}."
+                    )
 
         elif isinstance(effect, GainCardCosting):
             if not choice:
                 return
             card_id = choice[0]
             card = get_card(card_id)
+            if state.supply.get(card_id, 0) <= 0:
+                return
             state.supply[card_id] -= 1
             self._send_to_zone(player, card, effect.to)
             state.log.append(f"{player.name} gains {card.name}.")
@@ -469,7 +710,8 @@ class GameEngine:
             # Queue a gain-costing effect for the upgrade.
             gain_effect = GainCardCosting(
                 max_cost=trashed.cost + effect.cost_increase,
-                to=Zone.DISCARD,
+                to=effect.to,
+                filter_type=effect.gain_filter_type,
             )
             state.effect_queue.insert(0, gain_effect)
 
@@ -481,6 +723,67 @@ class GameEngine:
             player.in_play.append(card)
             state.log.append(f"{player.name} plays {card.name}.")
             state.effect_queue = list(card.effects) + state.effect_queue
+
+        elif isinstance(effect, SentryTrash):
+            # Trash chosen cards; update staged list for next Sentry step.
+            trashed_indices = sorted((int(i) for i in choice), reverse=True)
+            remaining = list(effect.staged)
+            for idx in trashed_indices:
+                card = remaining.pop(idx)
+                state.trash.append(card)
+                state.log.append(f"{player.name} trashes {card.name}.")
+            # Update the downstream SentryDiscard and SentryReturn with remaining.
+            self._update_sentry_staged(remaining)
+
+        elif isinstance(effect, SentryDiscard):
+            # Discard chosen cards; update staged list for SentryReturn.
+            discarded_indices = sorted((int(i) for i in choice), reverse=True)
+            remaining = list(effect.staged)
+            for idx in discarded_indices:
+                card = remaining.pop(idx)
+                player.discard.append(card)
+                state.log.append(f"{player.name} discards {card.name}.")
+            self._update_sentry_staged(remaining)
+
+        elif isinstance(effect, SentryReturn):
+            # Put cards back on top of deck in the specified order.
+            # The player supplies indices in bottom-to-top order; we insert
+            # them one by one so the last index ends up on top.
+            ordered = [effect.staged[int(i)] for i in choice]
+            for card in ordered:
+                player.deck.insert(0, card)
+                state.log.append(f"{player.name} puts {card.name} back on their deck.")
+
+        elif isinstance(effect, LibrarySkipChoice):
+            if choice[0] == "yes":
+                # Set aside the candidate.
+                new_set_aside = effect.set_aside + [effect.candidate]
+                state.log.append(
+                    f"{player.name} sets aside {effect.candidate.name}."
+                )
+            else:
+                # Keep the candidate.
+                player.hand.append(effect.candidate)
+                state.log.append(
+                    f"{player.name} keeps {effect.candidate.name}."
+                )
+                new_set_aside = effect.set_aside
+            # Continue the Library loop.
+            state.effect_queue.insert(
+                0,
+                LibraryContinue(set_aside=new_set_aside, target=effect.target),
+            )
+
+        elif isinstance(effect, _BanditChoose):
+            # Player chose which revealed card to trash; discard the rest.
+            trash_idx = int(choice[0])
+            for i, card in enumerate(effect.revealed):
+                if i == trash_idx:
+                    state.trash.append(card)
+                    state.log.append(f"{player.name} trashes {card.name}.")
+                else:
+                    player.discard.append(card)
+                    state.log.append(f"{player.name} discards {card.name}.")
 
         else:
             state.log.append(
@@ -596,6 +899,20 @@ class GameEngine:
                 return p
         raise KeyError(f"No player with id {player_id!r}")
 
+    def _update_sentry_staged(self, remaining: list[Card]) -> None:
+        """Update SentryDiscard and SentryReturn in the effect queue with new staged list.
+
+        Called after SentryTrash or SentryDiscard resolves to propagate the
+        remaining cards to the next Sentry step.
+        """
+        for i, effect in enumerate(self.state.effect_queue):
+            if isinstance(effect, (SentryDiscard, SentryReturn)):
+                # Replace with updated staged list.
+                if isinstance(effect, SentryDiscard):
+                    self.state.effect_queue[i] = SentryDiscard(staged=remaining)
+                else:
+                    self.state.effect_queue[i] = SentryReturn(staged=remaining)
+
     def _zone_cards(self, player: PlayerState, zone: Zone) -> list[Card]:
         mapping = {
             Zone.HAND: player.hand,
@@ -620,3 +937,7 @@ class GameEngine:
             self.state.trash.append(card)
         else:
             raise ValueError(f"Cannot send card to zone {zone!r}.")
+
+
+# Alias for compatibility
+Engine = GameEngine

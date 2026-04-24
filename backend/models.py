@@ -105,13 +105,18 @@ class DiscardCards(Effect):
 
 @dataclass
 class ChooseCards(Effect):
-    """Generic player-choice effect: select cards from a zone."""
+    """Generic player-choice effect: select cards from a zone.
+
+    When move_to is set, the chosen cards are moved from *zone* to *move_to*
+    during _apply_choice — no separate PutBack effect is needed.
+    """
 
     prompt: str
     zone: Zone
     min: int
     max: int
     filter_type: CardType | None = None
+    move_to: Zone | None = None
 
     @property
     def requires_choice(self) -> bool:
@@ -172,6 +177,7 @@ class GainCardCosting(Effect):
 
     max_cost: int
     to: Zone = Zone.DISCARD
+    filter_type: CardType | None = None
 
     @property
     def requires_choice(self) -> bool:
@@ -180,9 +186,118 @@ class GainCardCosting(Effect):
 
 @dataclass
 class TrashAndGainUpgrade(Effect):
-    """Trash a card, gain one costing up to cost_increase more (Remodel)."""
+    """Trash a card from hand, gain one costing up to cost_increase more.
+
+    filter_type restricts which cards may be trashed (None = any card).
+    to controls where the gained card lands (default: DISCARD).
+    gain_filter_type restricts which cards may be gained (None = any card).
+    """
 
     cost_increase: int
+    filter_type: CardType | None = None
+    to: Zone = Zone.DISCARD
+    gain_filter_type: CardType | None = None
+
+    @property
+    def requires_choice(self) -> bool:
+        return True
+
+
+@dataclass
+class DrawToHandSize(Effect):
+    """Library: draw cards one at a time until hand reaches *target* size.
+
+    When an Action card is drawn, the player may set it aside (it goes to
+    discard at the end).  Non-Action cards are always kept.
+    The engine resolves this as a loop that pauses for each Action card drawn.
+    """
+
+    target: int = 7
+
+
+@dataclass
+class InspectTopCards(Effect):
+    """Sentry: look at the top *n* cards of your deck.
+
+    The engine stages those cards (removes from deck) then asks the player to
+    choose which to trash, which to discard, and which to put back (in order).
+    Implemented as a three-step interaction driven by sub-effects queued after
+    staging.
+    """
+
+    n: int = 2
+
+
+@dataclass
+class SentryTrash(Effect):
+    """Internal effect: player chooses which staged Sentry cards to trash."""
+
+    staged: list["Card"]
+
+    @property
+    def requires_choice(self) -> bool:
+        return True
+
+
+@dataclass
+class SentryDiscard(Effect):
+    """Internal effect: player chooses which remaining staged Sentry cards to discard."""
+
+    staged: list["Card"]
+
+    @property
+    def requires_choice(self) -> bool:
+        return True
+
+
+@dataclass
+class SentryReturn(Effect):
+    """Internal effect: player chooses order to return remaining Sentry cards to deck-top."""
+
+    staged: list["Card"]
+
+    @property
+    def requires_choice(self) -> bool:
+        return True
+
+
+@dataclass
+class BanditAttack(Effect):
+    """Internal effect applied to each opponent during Bandit's attack.
+
+    Reveals the top 2 cards of the opponent's deck, trashes a non-Copper
+    Treasure among them (opponent chooses if multiple), and discards the rest.
+    """
+
+    pass
+
+
+@dataclass
+class LibraryContinue(Effect):
+    """Internal loop-continuation effect for Library.
+
+    *set_aside* holds Action cards the player has chosen to skip so far.
+    The engine pops this, draws one card, and either:
+      - keeps it and re-queues another LibraryContinue (if hand still < target),
+      - asks the player whether to keep or skip the drawn Action card, or
+      - terminates the loop and discards all set_aside cards.
+    """
+
+    set_aside: list["Card"]
+    target: int = 7
+
+
+@dataclass
+class LibrarySkipChoice(Effect):
+    """Internal effect: ask whether to set aside a drawn Action card for Library.
+
+    *candidate* is the Action card just drawn.
+    *set_aside* is the list of previously skipped cards.
+    """
+
+    candidate: "Card"
+    set_aside: list["Card"]
+    target: int = 7
 
     @property
     def requires_choice(self) -> bool:
