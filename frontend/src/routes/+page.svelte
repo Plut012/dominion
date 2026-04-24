@@ -43,6 +43,55 @@
 	let buyTarget = $state<{ card: Card; pile: SupplyPile } | null>(null)
 	let lastGained = $state<Card | null>(null)
 
+	// ChoiceModal ref
+	let choiceModal = $state<{ confirm: () => void; skip: () => void } | null>(null)
+
+	// End-phase confirmation
+	let endPhaseConfirming = $state(false)
+	let endPhaseTimeout: ReturnType<typeof setTimeout> | null = null
+
+	function handleKeydown(e: KeyboardEvent) {
+		// Ignore when typing in inputs
+		const tag = (e.target as HTMLElement)?.tagName
+		if (tag === 'INPUT' || tag === 'TEXTAREA') return
+		// Ignore during game over
+		if (gameOver) return
+		// Not in game
+		if (!inGame) return
+
+		if (e.key === 'Enter') {
+			e.preventDefault()
+			if (pendingChoice && isMyTurn && choiceModal) {
+				choiceModal.confirm()
+			} else if (buyTarget) {
+				confirmBuy()
+			}
+		} else if (e.key === ' ') {
+			e.preventDefault()
+			if (pendingChoice && isMyTurn && choiceModal) {
+				choiceModal.skip()
+			} else if (buyTarget) {
+				cancelBuy()
+			}
+		} else if (e.key === 'Backspace') {
+			e.preventDefault()
+			if (!isMyTurn || !phase) return
+			if (phase !== 'action' && phase !== 'buy') return
+			// Ignore if a modal is open
+			if (pendingChoice || buyTarget) return
+			if (endPhaseConfirming) {
+				// Second press confirms
+				if (endPhaseTimeout) clearTimeout(endPhaseTimeout)
+				endPhaseConfirming = false
+				game.endPhase()
+			} else {
+				// First press: start confirmation window
+				endPhaseConfirming = true
+				endPhaseTimeout = setTimeout(() => { endPhaseConfirming = false }, 1500)
+			}
+		}
+	}
+
 	function onSupplyClick(card: Card, pile: SupplyPile) {
 		if (!canBuy || coins < card.cost || pile.count <= 0) return
 		buyTarget = { card, pile }
@@ -66,6 +115,8 @@
 		window.location.reload()
 	}
 </script>
+
+<svelte:window onkeydown={handleKeydown} />
 
 {#if !inGame}
 	<Lobby />
@@ -112,6 +163,11 @@
 
 		<!-- Controls + hand (bottom) -->
 		<div class="board-bottom">
+			{#if endPhaseConfirming}
+				<div class="end-phase-confirm">
+					Press Backspace again to {phase === 'action' ? 'end actions' : 'end turn'}
+				</div>
+			{/if}
 			<TurnControls />
 			<Hand cards={hand} {canPlay} {deckCount} {discardCount} {discardTop} {lastGained} />
 		</div>
@@ -136,7 +192,7 @@
 
 	<!-- Choice modal -->
 	{#if pendingChoice && isMyTurn}
-		<ChoiceModal choice={pendingChoice} {hand} {supply} />
+		<ChoiceModal bind:this={choiceModal} choice={pendingChoice} {hand} {supply} />
 	{/if}
 
 	<!-- Game over -->
@@ -293,6 +349,24 @@
 	.board-bottom {
 		flex-shrink: 0;
 		border-top: 1px solid var(--border);
+	}
+
+	/* === End-phase confirmation === */
+	.end-phase-confirm {
+		text-align: center;
+		padding: 4px var(--space-md);
+		font-size: 0.75rem;
+		font-family: var(--font-heading);
+		letter-spacing: 0.06em;
+		color: var(--accent);
+		background: rgba(201, 168, 76, 0.1);
+		border-top: 1px solid var(--accent-dim);
+		animation: fadeIn 100ms ease-out;
+	}
+
+	@keyframes fadeIn {
+		from { opacity: 0; }
+		to { opacity: 1; }
 	}
 
 	/* === Buy popup === */

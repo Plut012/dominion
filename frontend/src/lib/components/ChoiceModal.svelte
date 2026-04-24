@@ -58,6 +58,8 @@
 			selected = []
 		}
 	}
+
+	export { confirm, skip }
 </script>
 
 <div class="modal-overlay">
