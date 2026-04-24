@@ -13,6 +13,7 @@ from models import (
     AddActions,
     AddBuys,
     AddCoins,
+    BanditAttack,
     Card,
     CardType,
     CellarDiscard,
@@ -21,9 +22,11 @@ from models import (
     DiscardDownTo,
     DiscardPerEmptyPile,
     DrawCards,
+    DrawToHandSize,
     ForEachOpponent,
     GainCard,
     GainCardCosting,
+    InspectTopCards,
     MayPlay,
     MayPlayFromDiscard,
     MoneylenderTrash,
@@ -187,18 +190,13 @@ HARBINGER = Card(
     effects=[
         DrawCards(1),
         AddActions(1),
-        # Player may look at their discard and optionally put one card on top
-        # of their deck.
-        # NOTE: models.py has no "MayPutFromDiscardOnDeck" effect. Closest
-        # approximation uses ChooseCards from DISCARD (min=0) then PutBack to
-        # DECK. Engine must wire the chosen card from discard to deck-top.
         ChooseCards(
             prompt="You may put a card from your discard pile onto your deck.",
             zone=Zone.DISCARD,
             min=0,
             max=1,
+            move_to=Zone.DECK,
         ),
-        PutBack(to=Zone.DECK),
     ],
     description="+1 Card, +1 Action. You may put a card from your discard onto your deck.",
     art="harbinger.webp",
@@ -268,20 +266,16 @@ BUREAUCRAT = Card(
     effects=[
         GainCard(card_id="silver", to=Zone.DECK),
         ForEachOpponent(effects=[
-            # Each opponent reveals a Victory card from hand and puts it on
-            # their deck (or reveals a hand with no Victory cards).
-            # NOTE: models.py has no "RevealAndPutVictoryOnDeck" effect.
-            # Closest: ChooseCards(filter_type=VICTORY, min=0, max=1) + PutBack(DECK).
-            # Engine must enforce "must choose one if you have one" and handle
-            # the "reveal hand with no Victory cards" case.
+            # If opponent has a Victory card in hand they must put one on their deck.
+            # min=0 handles the "no Victory cards" case gracefully.
             ChooseCards(
-                prompt="Reveal a Victory card from your hand and put it on your deck (or reveal a hand with no Victory cards).",
+                prompt="Put a Victory card from your hand onto your deck (or reveal a hand with no Victory cards).",
                 zone=Zone.HAND,
                 min=0,
                 max=1,
                 filter_type=CardType.VICTORY,
+                move_to=Zone.DECK,
             ),
-            PutBack(to=Zone.DECK),
         ]),
     ],
     description=(
@@ -403,18 +397,7 @@ BANDIT = Card(
     effects=[
         GainCard(card_id="gold", to=Zone.DISCARD),
         ForEachOpponent(effects=[
-            # Reveal top 2 cards; trash a revealed non-Copper Treasure;
-            # discard the rest.
-            # NOTE: models.py has no "RevealTrashNonCopperTreasureDiscardRest"
-            # effect. RevealCards(2) is the closest starting point; the engine
-            # needs custom resolution logic for this attack step: auto-trash the
-            # highest-cost non-Copper treasure among the revealed cards and
-            # discard the remainder.
-            RevealCards(2),
-            # TODO: engine must implement Bandit attack resolution:
-            #   1. If any revealed card is a non-Copper Treasure, trash one
-            #      (highest cost, or first found).
-            #   2. Discard remaining revealed cards.
+            BanditAttack(),
         ]),
     ],
     description=(
@@ -474,18 +457,7 @@ LIBRARY = Card(
     cost=5,
     types=[CardType.ACTION],
     effects=[
-        # Draw until you have 7 cards in hand, setting aside any Action cards
-        # drawn if you choose (discarding them at the end).
-        # NOTE: models.py has no "DrawToHandSize" or "DrawWithSkipActions"
-        # effect. The engine must implement Library as a loop:
-        #   while len(hand) < 7 and deck is not empty:
-        #     reveal top card
-        #     if it's an Action, player may set it aside (MayPlay/ChooseEffect)
-        #     else, draw it
-        #   discard all set-aside cards
-        # No existing effect type covers this; marking with RevealCards(1) as a
-        # placeholder to signal that the engine needs special handling.
-        # TODO: add DrawToHandSize(target=7, may_skip_type=CardType.ACTION) to models.py
+        DrawToHandSize(target=7),
     ],
     description=(
         "Draw until you have 7 cards in hand, "
@@ -515,16 +487,12 @@ MINE = Card(
     cost=5,
     types=[CardType.ACTION],
     effects=[
-        # Trash a Treasure from hand; gain a Treasure costing up to 3 more to hand.
-        # NOTE: TrashAndGainUpgrade exists but gains to DISCARD by default and
-        # doesn't filter by card type. Mine needs filter_type=TREASURE and
-        # to=HAND. Using GainCardCosting with to=HAND after a trash step as
-        # the closest composition. A dedicated TrashAndGainUpgrade variant
-        # with filter_type and to parameters would be cleaner.
-        TrashCards(min=0, max=1, filter_type=CardType.TREASURE),
-        GainCardCosting(max_cost=0, to=Zone.HAND),
-        # TODO: max_cost here must be computed at runtime as trashed_card.cost + 3.
-        # models.py should support TrashAndGainUpgrade(cost_increase=3, filter_type=TREASURE, to=HAND).
+        TrashAndGainUpgrade(
+            cost_increase=3,
+            filter_type=CardType.TREASURE,
+            to=Zone.HAND,
+            gain_filter_type=CardType.TREASURE,
+        ),
     ],
     description="You may trash a Treasure from your hand. Gain a Treasure costing up to 3 more than it, putting it into your hand.",
     art="mine.webp",
@@ -538,17 +506,7 @@ SENTRY = Card(
     effects=[
         DrawCards(1),
         AddActions(1),
-        # Look at the top 2 cards of your deck; trash and/or discard any of
-        # them; put the rest back in any order.
-        # NOTE: models.py has no "LookAtTopN_TrashDiscardOrReturn" effect.
-        # RevealCards(2) covers the look step; the player then needs three
-        # choices (trash / discard / put back) for each revealed card.
-        # TODO: add InspectTopCards(n=2) to models.py that lets the player
-        # choose trash/discard/putback for each revealed card.
-        RevealCards(2),
-        TrashCards(min=0, max=2),
-        DiscardCards(min=0, max=2),
-        PutBack(to=Zone.DECK),
+        InspectTopCards(n=2),
     ],
     description="+1 Card, +1 Action. Look at the top 2 cards of your deck. Trash and/or discard any number of them. Put the rest back in any order.",
     art="sentry.webp",
@@ -580,14 +538,13 @@ ARTISAN = Card(
     types=[CardType.ACTION],
     effects=[
         GainCardCosting(max_cost=5, to=Zone.HAND),
-        # Put a card from hand onto your deck.
         ChooseCards(
             prompt="Put a card from your hand onto your deck.",
             zone=Zone.HAND,
             min=1,
             max=1,
+            move_to=Zone.DECK,
         ),
-        PutBack(to=Zone.DECK),
     ],
     description="Gain a card costing up to 5 to your hand. Put a card from your hand onto your deck.",
     art="artisan.webp",
