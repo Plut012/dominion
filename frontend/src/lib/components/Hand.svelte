@@ -16,25 +16,11 @@
 
 	let selectedIndex = $state<number | null>(null)
 	let gainAnimCard = $state<Card | null>(null)
+	let playConfirm = $state<{ card: Card; origIndex: number } | null>(null)
 
-	// Split hand into playable cards and victory/curse cards (flat on table)
 	const playableCards = $derived(
 		cards.map((c, i) => ({ card: c, origIndex: i }))
-			.filter(({ card }) => !isVictoryOnly(card))
 	)
-	const tableCards = $derived(
-		cards.map((c, i) => ({ card: c, origIndex: i }))
-			.filter(({ card }) => isVictoryOnly(card))
-	)
-
-	function isVictoryOnly(card: Card): boolean {
-		// Pure victory or curse cards go on the table
-		// Action-Victory (like Gardens) stays in hand since it's playable
-		const types = card.types
-		if (types.includes('curse')) return true
-		if (types.includes('victory') && !types.includes('action')) return true
-		return false
-	}
 
 	$effect(() => {
 		if (lastGained) {
@@ -53,7 +39,7 @@
 			game.turnState.actions > 0
 		) {
 			selectedIndex = null
-			game.playCard(origIndex)
+			playConfirm = { card, origIndex }
 			return
 		}
 
@@ -65,6 +51,23 @@
 
 		selectedIndex = selectedIndex === origIndex ? null : origIndex
 	}
+
+	function confirmPlay() {
+		if (playConfirm) {
+			game.playCard(playConfirm.origIndex)
+			playConfirm = null
+		}
+	}
+
+	function cancelPlay() {
+		playConfirm = null
+	}
+
+	function isPlayConfirmVisible() {
+		return playConfirm !== null
+	}
+
+	export { confirmPlay, cancelPlay, isPlayConfirmVisible }
 
 	function isPlayable(card: Card): boolean {
 		if (!canPlay) return false
@@ -93,22 +96,10 @@
 
 	<!-- Hand (center) -->
 	<div class="hand-center">
-		<!-- Victory/curse cards flat on the table -->
-		{#if tableCards.length > 0}
-			<div class="table-cards">
-				{#each tableCards as { card, origIndex } (origIndex)}
-					<div class="table-card">
-						<CardComponent {card} />
-					</div>
-				{/each}
-			</div>
-		{/if}
-
-		<!-- Playable cards in hand -->
 		<div class="hand-area">
-			{#if playableCards.length === 0 && tableCards.length === 0}
+			{#if playableCards.length === 0}
 				<p class="empty-hand">No cards in hand</p>
-			{:else if playableCards.length > 0}
+			{:else}
 				<div class="hand-scroll">
 					<div class="hand-cards">
 						{#each playableCards as { card, origIndex }, i (origIndex)}
@@ -147,21 +138,45 @@
 	</div>
 </div>
 
+{#if playConfirm}
+	<!-- svelte-ignore a11y_click_events_have_key_events -->
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div class="play-overlay" onclick={cancelPlay}>
+		<!-- svelte-ignore a11y_click_events_have_key_events -->
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div class="play-confirm" onclick={(e) => e.stopPropagation()}>
+			<div class="play-card-preview">
+				<CardComponent card={playConfirm.card} />
+			</div>
+			<p class="play-prompt">Play <strong>{playConfirm.card.name}</strong>?</p>
+			<div class="play-actions">
+				<button class="btn-secondary" onclick={cancelPlay}>Cancel</button>
+				<button class="btn-primary" onclick={confirmPlay}>Play</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
 <style>
 	.hand-row {
 		display: flex;
 		align-items: flex-end;
-		padding: var(--space-sm);
+		padding: 2px var(--space-sm);
+		padding-left: 160px;
+		padding-right: 160px;
 		background: rgba(0, 0, 0, 0.3);
 		border-top: 1px solid var(--border);
 		gap: var(--space-sm);
-		min-height: 120px;
+		min-height: 56px;
+		overflow: visible;
 	}
 
 	@media (min-width: 768px) {
 		.hand-row {
-			min-height: 160px;
-			padding: var(--space-md);
+			min-height: 64px;
+			padding: 2px var(--space-md);
+			padding-left: 160px;
+			padding-right: 160px;
 		}
 	}
 
@@ -170,13 +185,13 @@
 		display: flex;
 		flex-direction: column;
 		align-items: center;
-		gap: 4px;
+		gap: 2px;
 		flex-shrink: 0;
-		width: 60px;
+		width: 44px;
 	}
 
 	@media (min-width: 768px) {
-		.pile { width: 80px; }
+		.pile { width: 56px; }
 	}
 
 	.pile-stack {
@@ -269,28 +284,10 @@
 		align-items: center;
 		min-width: 0;
 		gap: 4px;
+		overflow: visible;
 	}
 
-	/* === Table cards (victory/curse, flat) === */
-	.table-cards {
-		display: flex;
-		gap: 2px;
-		justify-content: center;
-	}
-
-	.table-card {
-		transform: scale(0.45) perspective(200px) rotateX(30deg);
-		transform-origin: bottom center;
-		opacity: 0.55;
-		transition: opacity var(--transition-fast);
-		margin: 0 -16px;
-	}
-
-	.table-card:hover {
-		opacity: 0.8;
-	}
-
-	/* === Hand === */
+/* === Hand === */
 	.hand-area {
 		display: flex;
 		align-items: flex-end;
@@ -306,11 +303,8 @@
 
 	.hand-scroll {
 		width: 100%;
-		overflow-x: auto;
-		overflow-y: visible;
+		overflow: visible;
 		padding-bottom: 10px;
-		scrollbar-width: thin;
-		scrollbar-color: var(--accent-dim) transparent;
 	}
 
 	.hand-cards {
@@ -323,8 +317,8 @@
 	}
 
 	.hand-card-wrapper {
-		margin-right: -22px;
-		transition: transform var(--transition-base);
+		margin-right: -20px;
+		transition: transform 200ms ease;
 		z-index: var(--i);
 		position: relative;
 	}
@@ -334,15 +328,84 @@
 	}
 
 	@media (min-width: 480px) {
-		.hand-card-wrapper { margin-right: -18px; }
+		.hand-card-wrapper { margin-right: -16px; }
 	}
 
 	@media (min-width: 768px) {
-		.hand-card-wrapper { margin-right: -20px; }
+		.hand-card-wrapper { margin-right: -18px; }
+	}
+
+	.hand-card-wrapper :global(.card) {
+		width: 100px;
+		min-width: 100px;
+	}
+
+	@media (min-width: 768px) {
+		.hand-card-wrapper :global(.card) {
+			width: 120px;
+			min-width: 120px;
+		}
 	}
 
 	.hand-card-wrapper:hover {
 		z-index: 50;
-		transform: translateY(-8px);
+		transform: translateY(-30px) scale(1.5);
+	}
+
+	/* === Play confirmation overlay === */
+	.play-overlay {
+		position: fixed;
+		inset: 0;
+		z-index: 200;
+		background: rgba(0, 0, 0, 0.7);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		backdrop-filter: blur(3px);
+	}
+
+	.play-confirm {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: var(--space-md);
+		animation: playConfirmIn 180ms ease-out;
+	}
+
+	@keyframes playConfirmIn {
+		from { opacity: 0; transform: scale(0.9) translateY(12px); }
+		to { opacity: 1; transform: scale(1) translateY(0); }
+	}
+
+	.play-card-preview {
+		transform: scale(2.4);
+		transform-origin: center;
+		margin-bottom: 80px;
+		margin-top: 60px;
+	}
+
+	.play-card-preview :global(.card:hover) {
+		transform: none !important;
+		box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5) !important;
+	}
+
+	.play-prompt {
+		font-family: var(--font-heading);
+		font-size: 1.1rem;
+		color: var(--text);
+		text-align: center;
+	}
+
+	.play-prompt strong {
+		color: var(--accent);
+	}
+
+	.play-actions {
+		display: flex;
+		gap: var(--space-sm);
+	}
+
+	.play-actions button {
+		min-width: 80px;
 	}
 </style>

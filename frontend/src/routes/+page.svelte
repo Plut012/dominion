@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte'
 	import { game } from '$lib/stores/game.svelte'
 	import type { Card, SupplyPile } from '$lib/game/types'
+	import CardComponent from '$lib/components/Card.svelte'
 	import Lobby from '$lib/components/Lobby.svelte'
 	import Hand from '$lib/components/Hand.svelte'
 	import Supply from '$lib/components/Supply.svelte'
@@ -33,7 +34,8 @@
 	const discardTop = $derived(gameState?.discard_top ?? null)
 
 	const canPlay = $derived(isMyTurn && (phase === 'action' || phase === 'buy'))
-	const canBuy = $derived(isMyTurn && phase === 'buy')
+	const buys = $derived(turnState?.buys ?? 0)
+	const canBuy = $derived(isMyTurn && phase === 'buy' && buys > 0)
 	const coins = $derived(turnState?.coins ?? 0)
 
 	// Log drawer
@@ -45,6 +47,9 @@
 
 	// ChoiceModal ref
 	let choiceModal = $state<{ confirm: () => void; skip: () => void } | null>(null)
+
+	// Hand ref (for play confirmation)
+	let handRef = $state<{ confirmPlay: () => void; cancelPlay: () => void; isPlayConfirmVisible: () => boolean } | null>(null)
 
 	// End-phase confirmation
 	let endPhaseConfirming = $state(false)
@@ -61,14 +66,18 @@
 
 		if (e.key === 'Enter') {
 			e.preventDefault()
-			if (pendingChoice && isMyTurn && choiceModal) {
+			if (handRef?.isPlayConfirmVisible()) {
+				handRef.confirmPlay()
+			} else if (pendingChoice && isMyTurn && choiceModal) {
 				choiceModal.confirm()
 			} else if (buyTarget) {
 				confirmBuy()
 			}
 		} else if (e.key === ' ') {
 			e.preventDefault()
-			if (pendingChoice && isMyTurn && choiceModal) {
+			if (handRef?.isPlayConfirmVisible()) {
+				handRef.cancelPlay()
+			} else if (pendingChoice && isMyTurn && choiceModal) {
 				choiceModal.skip()
 			} else if (buyTarget) {
 				cancelBuy()
@@ -156,20 +165,16 @@
 			<Supply {supply} canBuy={false} {coins} onCardClick={onSupplyClick} />
 		</div>
 
-		<!-- Play area (compact) -->
-		<div class="board-play">
-			<PlayArea {inPlay} opponents={[]} />
-		</div>
-
 		<!-- Controls + hand (bottom) -->
 		<div class="board-bottom">
+			<PlayArea {inPlay} opponents={[]} />
+			<TurnControls />
 			{#if endPhaseConfirming}
 				<div class="end-phase-confirm">
 					Press Backspace again to {phase === 'action' ? 'end actions' : 'end turn'}
 				</div>
 			{/if}
-			<TurnControls />
-			<Hand cards={hand} {canPlay} {deckCount} {discardCount} {discardTop} {lastGained} />
+			<Hand bind:this={handRef} cards={hand} {canPlay} {deckCount} {discardCount} {discardTop} {lastGained} />
 		</div>
 	</div>
 
@@ -180,7 +185,10 @@
 		<div class="buy-overlay" onclick={cancelBuy}>
 			<!-- svelte-ignore a11y_click_events_have_key_events -->
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
-			<div class="buy-popup" onclick={(e) => e.stopPropagation()}>
+			<div class="buy-confirm" onclick={(e) => e.stopPropagation()}>
+				<div class="buy-card-preview">
+					<CardComponent card={buyTarget.card} />
+				</div>
 				<p class="buy-prompt">Buy <strong>{buyTarget.card.name}</strong> for {buyTarget.card.cost} coin{buyTarget.card.cost !== 1 ? 's' : ''}?</p>
 				<div class="buy-actions">
 					<button class="btn-secondary" onclick={cancelBuy}>Cancel</button>
@@ -333,16 +341,8 @@
 	/* === Supply (main) === */
 	.board-supply {
 		flex: 1;
-		overflow-y: auto;
-		overflow-x: hidden;
-	}
-
-	/* === Play area (compact) === */
-	.board-play {
-		flex-shrink: 0;
-		border-top: 1px solid var(--border);
-		max-height: 100px;
-		overflow-x: auto;
+		overflow: hidden;
+		min-height: 0;
 	}
 
 	/* === Bottom === */
@@ -374,34 +374,41 @@
 		position: fixed;
 		inset: 0;
 		z-index: 200;
-		background: rgba(0, 0, 0, 0.6);
+		background: rgba(0, 0, 0, 0.7);
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		backdrop-filter: blur(2px);
+		backdrop-filter: blur(3px);
 	}
 
-	.buy-popup {
-		background: var(--bg-surface);
-		border: 1px solid var(--border-strong);
-		border-radius: var(--radius-md);
-		padding: var(--space-lg) var(--space-xl);
+	.buy-confirm {
 		display: flex;
 		flex-direction: column;
 		align-items: center;
 		gap: var(--space-md);
-		animation: popIn 150ms ease-out;
-		min-width: 240px;
+		animation: popIn 180ms ease-out;
 	}
 
 	@keyframes popIn {
-		from { opacity: 0; transform: scale(0.95); }
-		to { opacity: 1; transform: scale(1); }
+		from { opacity: 0; transform: scale(0.9) translateY(12px); }
+		to { opacity: 1; transform: scale(1) translateY(0); }
+	}
+
+	.buy-card-preview {
+		transform: scale(2.4);
+		transform-origin: center;
+		margin-bottom: 80px;
+		margin-top: 60px;
+	}
+
+	.buy-card-preview :global(.card:hover) {
+		transform: none !important;
+		box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5) !important;
 	}
 
 	.buy-prompt {
 		font-family: var(--font-heading);
-		font-size: 1rem;
+		font-size: 1.1rem;
 		text-align: center;
 	}
 

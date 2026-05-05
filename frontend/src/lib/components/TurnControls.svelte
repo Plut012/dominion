@@ -69,11 +69,10 @@
 	.turn-controls {
 		display: flex;
 		align-items: center;
-		gap: var(--space-sm);
-		padding: var(--space-sm) var(--space-md);
+		justify-content: center;
+		gap: 5rem;
+		padding: 2px var(--space-md);
 		background: var(--bg-surface);
-		border-top: 1px solid var(--border);
-		flex-wrap: wrap;
 	}
 
 	.turn-controls.active {
@@ -154,7 +153,6 @@
 
 	/* Buttons */
 	.controls-buttons {
-		margin-left: auto;
 	}
 
 	.control-btn {

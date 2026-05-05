@@ -51,7 +51,7 @@ COPPER = Card(
     types=[CardType.TREASURE],
     effects=[AddCoins(1)],
     description="1 coin.",
-    art="copper.webp",
+    art="copper.jpeg",
     coins=1,
 )
 
@@ -62,7 +62,7 @@ SILVER = Card(
     types=[CardType.TREASURE],
     effects=[AddCoins(2)],
     description="2 coins.",
-    art="silver.webp",
+    art="silver.jpeg",
     coins=2,
 )
 
@@ -73,7 +73,7 @@ GOLD = Card(
     types=[CardType.TREASURE],
     effects=[AddCoins(3)],
     description="3 coins.",
-    art="gold.webp",
+    art="gold.jpeg",
     coins=3,
 )
 
@@ -88,7 +88,7 @@ ESTATE = Card(
     types=[CardType.VICTORY],
     effects=[],
     description="1 VP.",
-    art="estate.webp",
+    art="estate.jpeg",
     vp=1,
 )
 
@@ -99,7 +99,7 @@ DUCHY = Card(
     types=[CardType.VICTORY],
     effects=[],
     description="3 VP.",
-    art="duchy.webp",
+    art="duchy.jpeg",
     vp=3,
 )
 
@@ -110,7 +110,7 @@ PROVINCE = Card(
     types=[CardType.VICTORY],
     effects=[],
     description="6 VP.",
-    art="province.webp",
+    art="province.jpeg",
     vp=6,
 )
 
@@ -125,7 +125,7 @@ CURSE = Card(
     types=[CardType.CURSE],
     effects=[],
     description="-1 VP.",
-    art="curse.webp",
+    art="curse.jpeg",
     vp=-1,
 )
 
@@ -143,7 +143,7 @@ CELLAR = Card(
         CellarDiscard(),
     ],
     description="+1 Action. Discard any number of cards, then draw that many.",
-    art="cellar.webp",
+    art="cellar.jpeg",
 )
 
 CHAPEL = Card(
@@ -155,7 +155,7 @@ CHAPEL = Card(
         TrashCards(min=0, max=4),
     ],
     description="Trash up to 4 cards from your hand.",
-    art="chapel.webp",
+    art="chapel.jpeg",
 )
 
 MOAT = Card(
@@ -171,7 +171,7 @@ MOAT = Card(
         "When another player plays an Attack card, you may first reveal this "
         "from your hand. If you do, you are unaffected by that Attack."
     ),
-    art="moat.webp",
+    art="moat.jpeg",
     # NOTE: The reaction mechanic (block attack on reveal) is handled by the
     # engine's attack-resolution hook, not as an effect in this list. The
     # engine checks for REACTION cards in the target's hand before applying
@@ -199,7 +199,7 @@ HARBINGER = Card(
         ),
     ],
     description="+1 Card, +1 Action. You may put a card from your discard onto your deck.",
-    art="harbinger.webp",
+    art="harbinger.jpeg",
 )
 
 MERCHANT = Card(
@@ -213,7 +213,7 @@ MERCHANT = Card(
         RegisterMerchantBonus(),
     ],
     description="+1 Card, +1 Action. The first time you play a Silver this turn, +1 coin.",
-    art="merchant.webp",
+    art="merchant.jpeg",
 )
 
 VASSAL = Card(
@@ -226,7 +226,7 @@ VASSAL = Card(
         VassalDiscard(),
     ],
     description="+2 Coins. Discard the top card of your deck. If it's an Action card, you may play it.",
-    art="vassal.webp",
+    art="vassal.jpeg",
 )
 
 VILLAGE = Card(
@@ -239,7 +239,7 @@ VILLAGE = Card(
         AddActions(2),
     ],
     description="+1 Card, +2 Actions.",
-    art="village.webp",
+    art="village.jpeg",
 )
 
 WORKSHOP = Card(
@@ -251,7 +251,7 @@ WORKSHOP = Card(
         GainCardCosting(max_cost=4, to=Zone.DISCARD),
     ],
     description="Gain a card costing up to 4.",
-    art="workshop.webp",
+    art="workshop.jpeg",
 )
 
 # ---------------------------------------------------------------------------
@@ -283,7 +283,7 @@ BUREAUCRAT = Card(
         "Each other player reveals a Victory card from their hand and puts it onto their deck "
         "(or reveals a hand with no Victory cards)."
     ),
-    art="bureaucrat.webp",
+    art="bureaucrat.jpeg",
 )
 
 GARDENS = Card(
@@ -293,7 +293,7 @@ GARDENS = Card(
     types=[CardType.VICTORY],
     effects=[],
     description="Worth 1 VP per 10 cards in your deck (rounded down).",
-    art="gardens.webp",
+    art="gardens.jpeg",
     # NOTE: Gardens has a variable VP value (1 per 10 cards in full deck).
     # vp=0 here; the scoring engine must special-case Gardens (or any card
     # with a "variable_vp" flag) and compute its value at end-of-game.
@@ -312,7 +312,7 @@ MILITIA = Card(
         ]),
     ],
     description="+2 Coins. Each other player discards down to 3 cards in hand.",
-    art="militia.webp",
+    art="militia.jpeg",
 )
 
 MONEYLENDER = Card(
@@ -324,7 +324,7 @@ MONEYLENDER = Card(
         MoneylenderTrash(),
     ],
     description="You may trash a Copper from your hand. If you do, +3 Coins.",
-    art="moneylender.webp",
+    art="moneylender.jpeg",
 )
 
 POACHER = Card(
@@ -339,7 +339,7 @@ POACHER = Card(
         DiscardPerEmptyPile(),
     ],
     description="+1 Card, +1 Action, +1 Coin. Discard a card per empty Supply pile.",
-    art="poacher.webp",
+    art="poacher.jpeg",
 )
 
 REMODEL = Card(
@@ -351,7 +351,7 @@ REMODEL = Card(
         TrashAndGainUpgrade(cost_increase=2),
     ],
     description="Trash a card from your hand. Gain a card costing up to 2 more than it.",
-    art="remodel.webp",
+    art="remodel.jpeg",
 )
 
 SMITHY = Card(
@@ -363,7 +363,7 @@ SMITHY = Card(
         DrawCards(3),
     ],
     description="+3 Cards.",
-    art="smithy.webp",
+    art="smithy.jpeg",
 )
 
 THRONE_ROOM = Card(
@@ -382,7 +382,7 @@ THRONE_ROOM = Card(
         PlayCardTwice(),
     ],
     description="You may play an Action card from your hand twice.",
-    art="throne_room.webp",
+    art="throne_room.jpeg",
 )
 
 # ---------------------------------------------------------------------------
@@ -405,7 +405,7 @@ BANDIT = Card(
         "Each other player reveals the top 2 cards of their deck, "
         "trashes a revealed Treasure other than Copper, and discards the rest."
     ),
-    art="bandit.webp",
+    art="bandit.jpeg",
 )
 
 COUNCIL_ROOM = Card(
@@ -421,7 +421,7 @@ COUNCIL_ROOM = Card(
         ]),
     ],
     description="+4 Cards, +1 Buy. Each other player draws a card.",
-    art="council_room.webp",
+    art="council_room.jpeg",
 )
 
 FESTIVAL = Card(
@@ -435,7 +435,7 @@ FESTIVAL = Card(
         AddCoins(2),
     ],
     description="+2 Actions, +1 Buy, +2 Coins.",
-    art="festival.webp",
+    art="festival.jpeg",
 )
 
 LABORATORY = Card(
@@ -448,7 +448,7 @@ LABORATORY = Card(
         AddActions(1),
     ],
     description="+2 Cards, +1 Action.",
-    art="laboratory.webp",
+    art="laboratory.jpeg",
 )
 
 LIBRARY = Card(
@@ -463,7 +463,7 @@ LIBRARY = Card(
         "Draw until you have 7 cards in hand, "
         "optionally setting aside Action cards as you draw them."
     ),
-    art="library.webp",
+    art="library.jpeg",
 )
 
 MARKET = Card(
@@ -478,7 +478,7 @@ MARKET = Card(
         AddCoins(1),
     ],
     description="+1 Card, +1 Action, +1 Buy, +1 Coin.",
-    art="market.webp",
+    art="market.jpeg",
 )
 
 MINE = Card(
@@ -495,7 +495,7 @@ MINE = Card(
         ),
     ],
     description="You may trash a Treasure from your hand. Gain a Treasure costing up to 3 more than it, putting it into your hand.",
-    art="mine.webp",
+    art="mine.jpeg",
 )
 
 SENTRY = Card(
@@ -509,7 +509,7 @@ SENTRY = Card(
         InspectTopCards(n=2),
     ],
     description="+1 Card, +1 Action. Look at the top 2 cards of your deck. Trash and/or discard any number of them. Put the rest back in any order.",
-    art="sentry.webp",
+    art="sentry.jpeg",
 )
 
 WITCH = Card(
@@ -524,7 +524,7 @@ WITCH = Card(
         ]),
     ],
     description="+2 Cards. Each other player gains a Curse.",
-    art="witch.webp",
+    art="witch.jpeg",
 )
 
 # ---------------------------------------------------------------------------
@@ -547,7 +547,7 @@ ARTISAN = Card(
         ),
     ],
     description="Gain a card costing up to 5 to your hand. Put a card from your hand onto your deck.",
-    art="artisan.webp",
+    art="artisan.jpeg",
 )
 
 # ---------------------------------------------------------------------------

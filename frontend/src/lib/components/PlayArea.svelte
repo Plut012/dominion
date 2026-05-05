@@ -28,8 +28,9 @@
 	.play-area {
 		display: flex;
 		align-items: center;
-		padding: var(--space-xs) var(--space-md);
-		min-height: 50px;
+		justify-content: center;
+		padding: 2px var(--space-md);
+		min-height: 20px;
 		background: rgba(0, 0, 0, 0.1);
 	}
 
